@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'dart:html';
+import 'dart:js_interop';
 import 'dart:math' as math;
 
 import 'package:cross_file/cross_file.dart';
@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_web_plugins/flutter_web_plugins.dart';
 import 'package:get_thumbnail_video/src/image_format.dart';
 import 'package:get_thumbnail_video/src/video_thumbnail_platform.dart';
+import 'package:web/web.dart';
 
 // An error code value to error name Map.
 // See: https://developer.mozilla.org/en-US/docs/Web/API/MediaError/code
@@ -28,8 +29,7 @@ const Map<int, String> _kErrorValueToErrorDescription = <int, String>{
 
 // The default error message, when the error is an empty string
 // See: https://developer.mozilla.org/en-US/docs/Web/API/MediaError/message
-const String _kDefaultErrorMessage =
-    'No further diagnostic information can be determined or provided.';
+const String _kDefaultErrorMessage = 'No further diagnostic information can be determined or provided.';
 
 /// A web implementation of the VideoThumbnailPlatform of the VideoThumbnail plugin.
 class VideoThumbnailWeb extends VideoThumbnailPlatform {
@@ -61,7 +61,7 @@ class VideoThumbnailWeb extends VideoThumbnailPlatform {
       quality: quality,
     );
 
-    return XFile(Url.createObjectUrlFromBlob(blob), mimeType: blob.type);
+    return XFile(URL.createObjectURL(blob), mimeType: blob.type);
   }
 
   @override
@@ -83,10 +83,10 @@ class VideoThumbnailWeb extends VideoThumbnailPlatform {
       timeMs: timeMs,
       quality: quality,
     );
-    final path = Url.createObjectUrlFromBlob(blob);
+    final path = URL.createObjectURL(blob);
     final file = XFile(path, mimeType: blob.type);
     final bytes = await file.readAsBytes();
-    Url.revokeObjectUrl(path);
+    URL.revokeObjectURL(path);
 
     return bytes;
   }
@@ -102,7 +102,7 @@ class VideoThumbnailWeb extends VideoThumbnailPlatform {
   }) async {
     final completer = Completer<Blob>();
 
-    final video = document.createElement('video') as VideoElement;
+    final video = document.createElement('video') as HTMLVideoElement;
     final timeSec = math.max(timeMs / 1000, 0);
     final fetchVideo = headers != null && headers.isNotEmpty;
 
@@ -110,13 +110,13 @@ class VideoThumbnailWeb extends VideoThumbnailPlatform {
       video.currentTime = timeSec;
 
       if (fetchVideo) {
-        Url.revokeObjectUrl(video.src);
+        URL.revokeObjectURL(video.src);
       }
     });
 
     video.onSeeked.listen((Event e) async {
       if (!completer.isCompleted) {
-        final canvas = document.createElement('canvas') as CanvasElement;
+        final canvas = document.createElement('canvas') as HTMLCanvasElement;
         final ctx = canvas.getContext('2d')! as CanvasRenderingContext2D;
 
         if (maxWidth == 0 && maxHeight == 0) {
@@ -142,16 +142,17 @@ class VideoThumbnailWeb extends VideoThumbnailPlatform {
           canvas
             ..width = maxWidth
             ..height = maxHeight;
-          ctx.drawImageScaled(video, 0, 0, maxWidth, maxHeight);
+          ctx.drawImageScaled(video, 0, 0, maxWidth.toDouble(), maxHeight.toDouble());
         }
 
         try {
-          final blob = canvas.toBlob(
+          canvas.toBlob(
+            (Blob? blob) {
+              completer.complete(blob!);
+            }.toJS,
             _imageFormatToCanvasFormat(imageFormat),
-            quality / 100,
+            (quality / 100).toJS,
           );
-
-          completer.complete(blob);
         } catch (e, s) {
           completer.completeError(
             PlatformException(
@@ -174,8 +175,7 @@ class VideoThumbnailWeb extends VideoThumbnailPlatform {
         completer.completeError(
           PlatformException(
             code: _kErrorValueToErrorName[error.code]!,
-            message:
-                error.message != '' ? error.message : _kDefaultErrorMessage,
+            message: error.message != '' ? error.message : _kDefaultErrorMessage,
             details: _kErrorValueToErrorDescription[error.code],
           ),
         );
@@ -189,7 +189,7 @@ class VideoThumbnailWeb extends VideoThumbnailPlatform {
           headers: headers,
         );
 
-        video.src = Url.createObjectUrlFromBlob(blob);
+        video.src = URL.createObjectURL(blob);
       } catch (e, s) {
         completer.completeError(e, s);
       }
@@ -205,7 +205,7 @@ class VideoThumbnailWeb extends VideoThumbnailPlatform {
   /// Fetching video by [headers].
   ///
   /// To avoid reading the video's bytes into memory, set the
-  /// [HttpRequest.responseType] to 'blob'. This allows the blob to be stored in
+  /// [XMLHttpRequest.responseType] to 'blob'. This allows the blob to be stored in
   /// the browser's disk or memory cache.
   Future<Blob> _fetchVideoByHeaders({
     required String videoSrc,
@@ -213,10 +213,10 @@ class VideoThumbnailWeb extends VideoThumbnailPlatform {
   }) async {
     final completer = Completer<Blob>();
 
-    final xhr = HttpRequest()
-      ..open('GET', videoSrc, async: true)
+    final xhr = XMLHttpRequest()
+      ..open('GET', videoSrc, true)
       ..responseType = 'blob';
-    headers.forEach(xhr.setRequestHeader);
+    headers.forEach((key, value) => xhr.setRequestHeader(key, value));
 
     xhr.onLoad.first.then((ProgressEvent value) {
       completer.complete(xhr.response as Blob);
